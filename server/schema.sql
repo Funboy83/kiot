@@ -121,8 +121,9 @@ CREATE TABLE IF NOT EXISTS invoices (
   cost_total INTEGER NOT NULL DEFAULT 0,
   note TEXT
 );
-CREATE INDEX IF NOT EXISTS invoices_kind_created ON invoices(kind, created_at DESC);
-CREATE INDEX IF NOT EXISTS invoices_report ON invoices(kind, status, biz_date);
+CREATE INDEX IF NOT EXISTS invoices_kind_created ON invoices(kind, created_at DESC, id DESC);
+-- Covering index: date-range totals and daily reports never touch the table itself.
+CREATE INDEX IF NOT EXISTS invoices_report ON invoices(kind, status, biz_date, total, paid, subtotal, discount, cost_total, customer_id);
 CREATE INDEX IF NOT EXISTS invoices_customer ON invoices(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS invoices_unpaid ON invoices(customer_id, created_at)
   WHERE kind = 'invoice' AND status = 'completed' AND paid < total;
@@ -138,7 +139,7 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   unit_cost INTEGER NOT NULL DEFAULT 0,
   total INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS invoice_items_invoice ON invoice_items(invoice_id);
+CREATE INDEX IF NOT EXISTS invoice_items_invoice ON invoice_items(invoice_id, product_id, qty, total, unit_cost);
 CREATE INDEX IF NOT EXISTS invoice_items_product ON invoice_items(product_id);
 
 CREATE TABLE IF NOT EXISTS serials (

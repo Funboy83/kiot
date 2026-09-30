@@ -1,5 +1,8 @@
-import { notFound, paging, isDate, textMatch } from '../lib.js';
+import { notFound, paging, isDate, textMatch, ftsQuery } from '../lib.js';
 import { createSale, cancelInvoice, payInvoice } from '../services/sales.js';
+
+const SOLD_WITH_SERIAL = `SELECT ii.invoice_id FROM serials s JOIN invoice_item_serials x ON x.serial_id = s.id
+  JOIN invoice_items ii ON ii.id = x.item_id WHERE s.serial = ?`;
 
 export default function invoices(app, db) {
   app.get('/api/invoices', (c) => {
@@ -25,13 +28,20 @@ export default function invoices(app, db) {
       params.push(Number(query.customer_id));
     }
     if (query.unpaid === '1') where.push("i.status = 'completed' AND i.paid < i.total");
+    let needCustomerJoin = false;
     if (query.q) {
       const q = String(query.q).trim();
-      const m = textMatch(q, 'customers_fts', 'i.customer_id', ['cu.name', 'cu.code', 'cu.phone']);
-      where.push(`(i.code = ? OR i.code LIKE ? OR ${m.sql} OR i.id IN (
-        SELECT ii.invoice_id FROM invoice_items ii JOIN invoice_item_serials x ON x.item_id = ii.id
-        JOIN serials s ON s.id = x.serial_id WHERE s.serial = ?))`);
-      params.push(q.toUpperCase(), '%' + q.toUpperCase(), ...m.params, q);
+      if (/^[a-z]{2}\d{3,}$/i.test(q)) {
+        // Looks like a document code (HD000123): exact match on the unique index.
+        where.push(`(i.code = ? OR i.id IN (${SOLD_WITH_SERIAL}))`);
+        params.push(q.toUpperCase(), q);
+      } else {
+        const m = textMatch(q, 'customers_fts', 'i.customer_id', ['cu.name', 'cu.code', 'cu.phone']);
+        where.push(`(${m.sql} OR i.id IN (${SOLD_WITH_SERIAL})${/^\d+$/.test(q) ? ' OR i.code LIKE ?' : ''})`);
+        params.push(...m.params, q);
+        if (/^\d+$/.test(q)) params.push('%' + q);
+        needCustomerJoin = !ftsQuery(q);
+      }
     }
     const w = where.join(' AND ');
     const rows = db
@@ -48,7 +58,7 @@ export default function invoices(app, db) {
             .prepare(
               `SELECT COUNT(*) AS count, COALESCE(SUM(i.subtotal), 0) AS subtotal, COALESCE(SUM(i.discount), 0) AS discount,
                       COALESCE(SUM(i.total), 0) AS total, COALESCE(SUM(i.paid), 0) AS paid
-               FROM invoices i LEFT JOIN customers cu ON cu.id = i.customer_id WHERE ${w}`
+               FROM invoices i ${needCustomerJoin ? 'LEFT JOIN customers cu ON cu.id = i.customer_id' : ''} WHERE ${w}`
             )
             .get(...params)
         : null;
