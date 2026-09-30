@@ -25,6 +25,35 @@ ADMIN_PASSWORD='something-strong' npm start      # serves app + API on :3000 (PO
 that file (or `sqlite3 data/store.db ".backup backup.db"` while running).
 Restart the server after each `npm run build`.
 
+## Assistant (AI)
+
+Press **✨ Assistant** in the top bar (or Ctrl/Cmd+J) and ask about the store in English or
+Vietnamese: "ai còn đang nợ?", "top 10 products this month", "what will run out in two weeks?",
+"compare this month with last month". Answers stream in, with the store's own tables (sort,
+show all, export to CSV/Excel), small charts, highlights, suggested next steps and follow-up
+questions. Conversations are kept per user (☰ to reopen), with 👍/👎 and copy on every answer.
+
+It runs on the Claude API and is **read-only**: its tools can only read sales, products, stock,
+customers and debt; it cannot change anything, and it cannot see users, passwords or sessions.
+Cashiers get no cost or profit figures.
+
+To switch it on, set an API key from https://console.anthropic.com on the server and restart:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... npm start
+```
+
+Without a key the panel says how to set it up; the rest of the app is unaffected. Never commit
+the key. Optional: `AI_MODEL` (default `claude-opus-5-5`) and `AI_EFFORT` (default `low`,
+fastest; `medium` or `high` for harder analysis).
+
+How it works: `server/ai/tools.js` holds purpose-built queries (sales summary and trend, top
+products and customers, customer debts with ageing, product and customer lookup, stock health)
+plus a guarded `run_sql` fallback for admins (`server/ai/readonly-sql.js`: single SELECT only,
+checked against SQLite's own read-only flag and compiled program, run in a separate read-only
+process with a 5 s limit). Tables go straight from the tool to the panel, so the model never
+retypes rows and numbers are exact.
+
 ## Stack and why it is fast
 
 - **Server:** Node 20+, [Hono](https://hono.dev), SQLite via `better-sqlite3` (WAL mode).
@@ -66,7 +95,8 @@ npm test
 ```
 
 Covers auth, search, receipts, serial sales, credit and change, FIFO debt payment,
-cancel, order conversion, stock takes and report totals.
+cancel, order conversion, stock takes and report totals, and the assistant (tool loop,
+streaming, history, read-only SQL guard, roles) against a scripted stand-in for the API.
 
 ## Deploying
 

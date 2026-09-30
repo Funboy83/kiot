@@ -248,3 +248,15 @@ CREATE TABLE IF NOT EXISTS stock_moves (
   unit_cost INTEGER
 );
 CREATE INDEX IF NOT EXISTS stock_moves_product ON stock_moves(product_id, id DESC);
+
+-- Assistant conversations. `messages` is the model-facing history (JSON), `display` what the chat panel shows.
+CREATE TABLE IF NOT EXISTS ai_chats (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  messages TEXT NOT NULL DEFAULT '[]',
+  display TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai_chats_user ON ai_chats(user_id, updated_at DESC);
