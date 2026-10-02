@@ -5,6 +5,8 @@ import { get, qs } from '../api.js';
 
 export const AppContext = createContext({ user: null, settings: {} });
 export const useApp = () => useContext(AppContext);
+/** Simple mode (the default) hides screens and options most small shops never need. */
+export const useAdvanced = () => useContext(AppContext).settings.ui_mode === 'advanced';
 
 /** Loads a GET endpoint; re-runs when `path` changes. Pass null to skip. */
 export function useFetch(path) {

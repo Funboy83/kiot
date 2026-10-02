@@ -256,7 +256,23 @@ CREATE TABLE IF NOT EXISTS ai_chats (
   title TEXT NOT NULL,
   messages TEXT NOT NULL DEFAULT '[]',
   display TEXT NOT NULL DEFAULT '[]',
+  notes TEXT NOT NULL DEFAULT '[]', -- outcomes of action cards, told to the model with the next question
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ai_chats_user ON ai_chats(user_id, updated_at DESC);
+
+-- Changes the assistant proposed. They run only when the user confirms the card.
+CREATE TABLE IF NOT EXISTS ai_actions (
+  id INTEGER PRIMARY KEY,
+  chat_id INTEGER NOT NULL REFERENCES ai_chats(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  input TEXT NOT NULL,
+  card TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'done', 'cancelled')),
+  result TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai_actions_chat ON ai_actions(chat_id);

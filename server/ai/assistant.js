@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getSettings } from '../db.js';
 import { storeToday } from '../lib.js';
 import { toolsFor, ToolInputError } from './tools.js';
+import { actionsFor, publicCard } from './actions.js';
 import { QueryError } from './readonly-sql.js';
 
 export const MODEL = process.env.AI_MODEL || 'claude-opus-5-5';
@@ -36,14 +37,26 @@ stock_takes(id, code, status draft|balanced, created_at, balanced_at, diff_qty, 
 stock_moves(product_id, created_at, ref_type sale|cancel|receipt|stocktake|initial, ref_code, qty, balance, unit_cost)
 Money columns are integer cents. Sales = invoices WHERE kind='invoice' AND status='completed'. A customer's unpaid amount on an invoice is total - paid.`;
 
-const SYSTEM = `You are the built-in assistant of a retail store management app (point of sale, products with serial/IMEI tracking, stock, invoices, customers and debt, reports). You help the owner and staff understand their business from the store's own data.
+const SYSTEM = `You are the built-in assistant of a retail store management app (point of sale, products with serial/IMEI tracking, stock, invoices, customers and debt, reports). You help the owner and staff run the store: you answer questions from the store's own data and you do the work for them — create invoices, record payments, add or change customers and products, receive goods, correct stock, change settings.
 
 How to work:
-- Answer from the data. Call the tools to get numbers; never guess or invent figures, names or codes. If the data cannot answer, say so and say what would.
-- You can only read. You cannot create, change or delete anything (sales, prices, stock, payments). If asked to, explain where in the app to do it.
+- Answer from the data. Call the tools to get numbers; never guess or invent figures, names, ids or codes. If the data cannot answer, say so and say what would.
 - Resolve relative dates ("today", "this week", "tháng này", "last month") from the context line in the user's message. Weeks start on Monday.
 - Prefer the specific tools; use run_sql only when none fits. Make independent tool calls in parallel.
 - Be fast: one round of tool calls is usually enough.
+
+Doing things (actions):
+- Action tools (create_invoice, record_payment, cancel_invoice, save_customer, save_product, receive_goods, set_stock, update_settings) never change anything by themselves. Each one puts a card in front of the user with the details; it happens only when the user presses the button on the card. The user can also edit the payment and serials on an invoice card.
+- So after calling an action tool, write one short line in the user's language pointing to the card (e.g. "Hóa đơn đã soạn xong, kiểm tra rồi bấm **Create invoice**."). Do not repeat the card's details, and never say it is done. You learn the outcome from an <action_updates> note in a later message.
+- Actions need database ids: look products up with find_products and customers with find_customers first (in parallel). Tool errors tell you what to fix; fix and retry, or ask.
+- Pasted customer messages (Zalo, SMS, Facebook, often Vietnamese without accents, e.g. "a oi lay cho e 2 thung redbull voi 1 ip 17 pro max 256 nha, ck sau"): work out the customer, each product and quantity, special prices, and whether they pay now or later ("ck" = chuyển khoản/transfer, "ghi nợ"/"thiếu"/"tuần sau trả" = on credit, "tiền mặt"/"tm" = cash). Then call create_invoice straight away if everything is clear.
+- If something is unclear (a product matches several items, a product or customer is not found, a quantity is missing), do not guess: ask one short question and offer the choices as buttons:
+\`\`\`options
+{"question":"Which iPhone 17 Pro?","options":["iPhone 17 Pro 256GB — $1,099","iPhone 17 Pro Max 256GB — $1,199"]}
+\`\`\`
+  Clicking a button sends its text as the user's reply. Ask about everything unclear at once, one block per question.
+- A customer the system does not know: pass new_customer with what the message gives (name, phone); the card shows they will be added.
+- Changing several things at once is fine: call several action tools; each gets its own card.
 
 How to answer:
 - Reply in the language the user writes in (Vietnamese or English, or whatever they use). Keep the store's names and codes as they are.
@@ -59,8 +72,8 @@ How to answer:
 {"ref":"t2","type":"bar","x":"period","y":["revenue"],"title":"Revenue by day"}
 \`\`\`
   type is "bar", "line" or "hbar" (ranked horizontal bars, good for top-N). y is 1–3 numeric columns. Only chart tables with 2 or more rows.
-- After the data, add a short "highlights" list (2–4 bullets) of what stands out: biggest items, oldest items, unusual changes, risks. Then, when useful, 1–3 concrete suggested actions. Skip either when there is nothing real to say.
-- End every answer with 2–3 natural follow-up questions the user is likely to ask next, in their language, as:
+- For questions about data: after the data, add a short "highlights" list (2–4 bullets) of what stands out: biggest items, oldest items, unusual changes, risks. Then, when useful, 1–3 concrete suggested actions. Skip either when there is nothing real to say.
+- End every answer about data with 2–3 natural follow-up questions the user is likely to ask next, in their language, as:
 \`\`\`followups
 ["First question?","Second question?"]
 \`\`\`
@@ -94,6 +107,14 @@ const STATUS = {
   find_products: 'Looking up products',
   inventory_status: 'Checking stock',
   run_sql: 'Querying the store data',
+  create_invoice: 'Preparing the invoice',
+  record_payment: 'Preparing the payment',
+  cancel_invoice: 'Preparing the cancellation',
+  save_customer: 'Preparing the customer',
+  save_product: 'Preparing the product',
+  receive_goods: 'Preparing the goods receipt',
+  set_stock: 'Preparing the stock correction',
+  update_settings: 'Preparing the settings change',
 };
 
 function contextLine(db, user, page) {
@@ -104,6 +125,7 @@ function contextLine(db, user, page) {
     `Today is ${weekday} ${today} (store time zone ${s.timezone}).`,
     `Store: ${s.store_name}. Currency: ${s.currency}.`,
     `User: ${user.name} (${user.role === 'admin' ? 'owner/admin' : 'cashier: no cost or profit data'}).`,
+    `App mode: ${s.ui_mode === 'advanced' ? 'advanced' : 'simple'}.`,
   ];
   if (page) parts.push(`They are looking at the app page ${String(page).slice(0, 200)}.`);
   return `<context>${parts.join(' ')}</context>`;
@@ -111,21 +133,29 @@ function contextLine(db, user, page) {
 
 /**
  * Runs one question. `emit(event, data)` streams to the panel:
- *   status {label} · text {delta} · table {id, title, columns, rows} · error {message}
- * Returns { messages, answer, tables } where messages is the new model-facing history.
+ *   status {label} · text {delta} · table {id, title, columns, rows} · action {id, type, status, card} · error {message}
+ * `updates` are notes about cards the user confirmed or dismissed since the last question.
+ * `proposeAction(type, input, card)` stores a proposed action and returns its id.
+ * Returns { messages, answer, tables, actions } where messages is the new model-facing history.
  */
-export async function runTurn({ client, db, user, history, question, page, query, nextTableId, emit, signal }) {
+export async function runTurn({ client, db, user, history, question, page, updates = [], query, nextTableId, proposeAction, emit, signal }) {
   const tools = toolsFor(user);
+  const actions = actionsFor(user);
   const byName = new Map(tools.map((t) => [t.def.name, t]));
-  const toolDefs = tools.map((t) => ({ ...t.def, eager_input_streaming: true }));
+  const actionByName = new Map(actions.map((a) => [a.def.name, a]));
+  const toolDefs = [...tools, ...actions].map((t) => ({ ...t.def, eager_input_streaming: true }));
   const settings = getSettings(db);
-  const ctx = { admin: user.role === 'admin', tz: settings.timezone, query };
+  const ctx = { admin: user.role === 'admin', tz: settings.timezone, query, settings, user };
 
   const messages = trimHistory(history).map((m) => (m.role === 'assistant' && Array.isArray(m.content) ? { ...m, content: forHistory(m.content) } : m));
-  messages.push({ role: 'user', content: [{ type: 'text', text: contextLine(db, user, page) }, { type: 'text', text: question }] });
+  const content = [{ type: 'text', text: contextLine(db, user, page) }];
+  if (updates.length) content.push({ type: 'text', text: `<action_updates>\n${updates.join('\n')}\n</action_updates>` });
+  content.push({ type: 'text', text: question });
+  messages.push({ role: 'user', content });
 
   let answer = '';
   const tables = {};
+  const proposed = [];
   let parseRetries = 0;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -189,10 +219,22 @@ export async function runTurn({ client, db, user, history, question, page, query
     const results = await Promise.all(
       calls.map(async (call) => {
         const tool = byName.get(call.name);
+        const action = actionByName.get(call.name);
         try {
-          if (!tool) throw new ToolInputError(`Unknown tool ${call.name}`);
+          if (!tool && !action) throw new ToolInputError(`Unknown tool ${call.name}`);
           if (typeof call.input !== 'object' || call.input === null || Array.isArray(call.input)) {
             throw new ToolInputError('INVALID_JSON: tool input must be an object');
+          }
+          if (action) {
+            const card = publicCard(action.prepare(db, call.input, {}, ctx));
+            const id = proposeAction(call.name, call.input, card);
+            proposed.push(id);
+            emit('action', { id, type: call.name, status: 'pending', card });
+            return {
+              type: 'tool_result',
+              tool_use_id: call.id,
+              content: JSON.stringify({ status: 'waiting_for_user', action_id: id, card: card.title, warnings: card.warnings, note: 'Shown to the user as a card with a confirm button. Nothing has changed yet.' }),
+            };
           }
           const out = await tool.run(db, call.input, ctx);
           return { type: 'tool_result', tool_use_id: call.id, content: JSON.stringify(present(out, tables, nextTableId, emit)) };
@@ -214,7 +256,7 @@ export async function runTurn({ client, db, user, history, question, page, query
       emit('text', { delta: msg });
     }
   }
-  return { messages, answer: answer.trim(), tables };
+  return { messages, answer: answer.trim(), tables, actions: proposed };
 }
 
 /** Moves a tool's table to the panel and gives the model a compact view of it. */

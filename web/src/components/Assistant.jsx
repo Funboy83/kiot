@@ -1,11 +1,14 @@
 // Store assistant side panel: streamed answers over the store's own data, with live tables
-// (sort, show all, export), small charts, follow-up questions, feedback and history.
+// (sort, show all, export), small charts, follow-up questions, feedback and history. It can also
+// prepare work (invoices, payments, customers, products, stock): each one arrives as a card that
+// does nothing until the user presses its confirm button.
 import { useState, useEffect, useRef, useMemo } from 'preact/hooks';
 import { get, post, del, money, num } from '../api.js';
-import { toast } from './ui.jsx';
+import { toast, useApp } from './ui.jsx';
 import { Markdown, splitBlocks } from './markdown.jsx';
 
 const SUGGESTIONS = [
+  'Chị Lan 0912 345 678 lấy 2 cáp USB-C, chuyển khoản',
   'Ai còn đang nợ?',
   'Doanh thu hôm nay thế nào so với hôm qua?',
   'Top 10 sản phẩm bán chạy tháng này',
@@ -211,6 +214,175 @@ function MiniChart({ table, spec }) {
   );
 }
 
+// ---------- action cards ----------
+
+const METHODS = [['cash', 'Cash'], ['transfer', 'Transfer'], ['card', 'Card']];
+const STATE = { done: 'Done', cancelled: 'Dismissed' };
+
+function ActionCard({ action, onChange }) {
+  const { reloadSettings } = useApp();
+  const { card, status, result } = action;
+  const t = card.totals || {};
+  const open = status === 'pending';
+  const can = (k) => open && card.editable?.includes(k);
+  const [paid, setPaid] = useState(t.paid != null ? String(t.paid / 100) : '');
+  const [method, setMethod] = useState(t.method || 'cash');
+  const [serials, setSerials] = useState(() => Object.fromEntries((card.lines || []).map((l, i) => [i, l.serials])));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const paidCents = paid === '' ? 0 : Math.max(0, Math.round(Number(paid) * 100) || 0);
+  const shownPaid = can('paid') ? Math.min(paidCents, t.total ?? paidCents) : t.paid;
+  const debtAfter = t.debt_after != null && t.total != null ? t.debt_after - (t.total - t.paid) + (t.total - shownPaid) : null;
+
+  const confirm = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const edits = {};
+      if (can('paid')) edits.paid = shownPaid;
+      if (can('method')) edits.method = method;
+      if (can('serials')) edits.serials = serials;
+      const next = await post(`/ai/actions/${action.id}/confirm`, edits);
+      onChange(next);
+      if (next.result?.reload) await reloadSettings();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const dismiss = async () => {
+    setBusy(true);
+    try {
+      onChange(await post(`/ai/actions/${action.id}/cancel`));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const pickSerial = (line, slot, value) =>
+    setSerials((s) => ({ ...s, [line]: s[line].map((v, k) => (k === slot ? value : v)) }));
+
+  return (
+    <div class={'ai-card' + (card.danger ? ' danger' : '') + (open ? '' : ' ' + status)}>
+      <div class="ai-card-head">
+        <span class="ai-card-icon">{card.icon}</span>
+        <b class="grow">{card.title}</b>
+        {!open && <span class={'badge ' + (status === 'done' ? 'good' : '')}>{STATE[status] || status}</span>}
+      </div>
+
+      {card.customer && (
+        <div class="ai-card-cust">
+          <span>👤 <b>{card.customer.name}</b>{card.customer.code ? <span class="faint"> · {card.customer.code}</span> : null}</span>
+          {card.customer.phone && <span class="faint">{card.customer.phone}</span>}
+          {card.customer.is_new && <span class="badge warn">new customer</span>}
+        </div>
+      )}
+
+      {card.lines?.length > 0 && (
+        <table class="ai-card-lines">
+          <tbody>
+            {card.lines.map((l, i) => (
+              <tr key={i}>
+                <td>
+                  <div>{l.name}</div>
+                  <div class="faint small">
+                    {l.qty} × {money(l.price - (l.discount || 0))}
+                    {l.discount ? <s class="faint"> {money(l.price)}</s> : null}
+                  </div>
+                  {l.serials?.length > 0 && (
+                    <div class="ai-serials">
+                      {(serials[i] || l.serials).map((sn, k) =>
+                        can('serials') && l.serial_options ? (
+                          <select key={k} value={sn} onChange={(e) => pickSerial(i, k, e.currentTarget.value)} aria-label={`Serial ${k + 1} for ${l.name}`}>
+                            {l.serial_options.map((o) => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                        ) : (
+                          <code key={k}>{sn}</code>
+                        )
+                      )}
+                    </div>
+                  )}
+                </td>
+                <td class="num">{money(l.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {card.fields?.length > 0 && (
+        <dl class="ai-card-fields">
+          {card.fields.map(([k, v, type], i) => (
+            <div key={i}><dt>{k}</dt><dd>{type === 'money' ? money(v) : v}</dd></div>
+          ))}
+        </dl>
+      )}
+
+      {t.total != null && (
+        <div class="ai-card-totals">
+          {t.discount > 0 && <div><span>Subtotal</span><span>{money(t.subtotal)}</span></div>}
+          {t.discount > 0 && <div><span>Discount</span><span>−{money(t.discount)}</span></div>}
+          <div class="big"><span>Total</span><span>{money(t.total)}</span></div>
+          {t.paid != null && (
+            <div>
+              <span>Paid now</span>
+              {can('paid') ? (
+                <input class="ai-paid" type="number" min="0" step="any" value={paid} onInput={(e) => setPaid(e.currentTarget.value)} aria-label="Paid now" />
+              ) : (
+                <span>{money(t.paid)}</span>
+              )}
+            </div>
+          )}
+          {t.paid != null && t.total - shownPaid > 0 && <div class="warn-text"><span>On credit</span><span>{money(t.total - shownPaid)}</span></div>}
+          {debtAfter != null && <div class="faint"><span>Customer owes after</span><span>{money(debtAfter)}</span></div>}
+        </div>
+      )}
+
+      {can('method') && shownPaid > 0 && (
+        <div class="ai-seg" role="group" aria-label="Payment method">
+          {METHODS.map(([k, label]) => (
+            <button key={k} class={method === k ? 'on' : ''} onClick={() => setMethod(k)}>{label}</button>
+          ))}
+        </div>
+      )}
+
+      {card.note && <div class="faint small">📝 {card.note}</div>}
+      {open && card.warnings?.map((w) => <div key={w} class="ai-warn">⚠ {w}</div>)}
+      {error && <div class="error small">{error}</div>}
+
+      {open ? (
+        <div class="ai-card-buttons">
+          <button class={card.danger ? 'danger' : 'primary'} disabled={busy} onClick={confirm}>{busy ? 'Working…' : card.confirm || 'Confirm'}</button>
+          <button class="ghost" disabled={busy} onClick={dismiss}>Dismiss</button>
+        </div>
+      ) : (
+        result && (
+          <div class="ai-card-result">
+            ✓ {result.message}
+            {result.link && <a href={result.link}>Open →</a>}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+/** A question with clickable answers: ```options {"question": "...", "options": ["...", ...]} */
+function Options({ spec, onAsk, live }) {
+  if (!spec || !Array.isArray(spec.options)) return null;
+  return (
+    <div class="ai-options">
+      {spec.question && <div class="ai-options-q">{spec.question}</div>}
+      {spec.options.filter((o) => typeof o === 'string').slice(0, 8).map((o) => (
+        <button key={o} class="ai-option" disabled={!live} onClick={() => onAsk(o)}>{o}</button>
+      ))}
+    </div>
+  );
+}
+
 // ---------- one answer ----------
 
 function parseJson(s) {
@@ -221,7 +393,7 @@ function parseJson(s) {
   }
 }
 
-function Answer({ item, onAsk }) {
+function Answer({ item, onAsk, live, actions, onAction }) {
   const blocks = useMemo(() => splitBlocks(item.text || ''), [item.text]);
   const followups = [];
   const body = blocks.map((b, i) => {
@@ -233,6 +405,7 @@ function Answer({ item, onAsk }) {
       }
       return null;
     }
+    if (b.lang === 'options') return b.open ? null : <Options key={i} spec={parseJson(b.body)} onAsk={onAsk} live={live} />;
     if (b.lang === 'table' || b.lang === 'chart') {
       if (b.open) return <div key={i} class="ai-skeleton">{b.lang === 'table' ? 'Preparing table…' : 'Drawing chart…'}</div>;
       const spec = parseJson(b.body);
@@ -245,6 +418,7 @@ function Answer({ item, onAsk }) {
   return (
     <>
       <div class="ai-md">{body}</div>
+      {item.actions?.map((id) => actions[id] && <ActionCard key={id} action={actions[id]} onChange={onAction} />)}
       {item.streaming && item.status && <div class="ai-status"><span class="ai-dot" />{item.status}…</div>}
       {item.streaming && !item.status && !item.text && <div class="ai-status"><span class="ai-dot" />Thinking…</div>}
       {item.error && <div class="error small">{item.error}</div>}
@@ -268,6 +442,10 @@ function plainText(item) {
         if (!t) return '';
         const cols = viewColumns(t, spec);
         return [cols.map((c) => c.label).join('\t'), ...t.rows.map((r) => cols.map((c) => fmt(r[c.key], c.type)).join('\t'))].join('\n');
+      }
+      if (b.lang === 'options') {
+        const spec = parseJson(b.body);
+        return spec ? [spec.question, ...(spec.options || []).map((o) => '- ' + o)].filter(Boolean).join('\n') : '';
       }
       return b.lang === 'chart' || b.lang === 'followups' ? '' : b.body;
     })
@@ -320,6 +498,7 @@ export default function Assistant({ onClose }) {
   const [chatId, setChatId] = useState(() => Number(store.get('ai.chat')) || null);
   const [title, setTitle] = useState('');
   const [items, setItems] = useState([]);
+  const [actions, setActions] = useState({});
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -347,6 +526,7 @@ export default function Assistant({ onClose }) {
       .then((c) => {
         setTitle(c.title);
         setItems(c.items.map((it, index) => ({ ...it, index })));
+        setActions(c.actions || {});
       })
       .catch(() => setChatId(null));
   }, [chatId]);
@@ -376,6 +556,10 @@ export default function Assistant({ onClose }) {
         else if (event === 'text') patchLast((it) => ({ text: it.text + data.delta, status: null }));
         else if (event === 'reset') patchLast((it) => ({ text: it.text.slice(0, data.length) }));
         else if (event === 'table') patchLast((it) => ({ tables: { ...it.tables, [data.id]: data } }));
+        else if (event === 'action') {
+          setActions((a) => ({ ...a, [data.id]: data }));
+          patchLast((it) => ({ actions: [...(it.actions || []), data.id] }));
+        }
         else if (event === 'error') patchLast(() => ({ error: data.message }));
         else if (event === 'done') patchLast(() => ({ index: data.index }));
       });
@@ -393,6 +577,7 @@ export default function Assistant({ onClose }) {
     ctl.current?.abort();
     setChatId(null);
     setItems([]);
+    setActions({});
     setTitle('');
     setShowHistory(false);
     inputRef.current?.focus();
@@ -479,8 +664,8 @@ export default function Assistant({ onClose }) {
         {!disabled && !items.length && (
           <div class="ai-empty">
             <div class="ai-hello">✨</div>
-            <h3>Ask about your store</h3>
-            <p class="muted">Sales, debts, stock, products, customers. Answers come from your own data, in English or Tiếng Việt.</p>
+            <h3>Ask or tell me what to do</h3>
+            <p class="muted">Paste a customer’s message to make an invoice, or ask about sales, debts and stock. English or Tiếng Việt. Nothing changes until you confirm it.</p>
             <div class="ai-suggest">
               {SUGGESTIONS.map((s) => <button key={s} class="ai-chip" onClick={() => ask(s)}>{s}</button>)}
             </div>
@@ -491,7 +676,7 @@ export default function Assistant({ onClose }) {
             <div key={i} class="ai-q">{it.text}</div>
           ) : (
             <div key={i} class="ai-a">
-              <Answer item={it} onAsk={ask} />
+              <Answer item={it} onAsk={ask} live={!busy && i === items.length - 1} actions={actions} onAction={(a) => setActions((m) => ({ ...m, [a.id]: a }))} />
               {!it.streaming && it.text && (
                 <div class="ai-actions">
                   <button class={'ghost icon-btn' + (it.feedback === 1 ? ' on' : '')} onClick={() => feedback(i, 1)} title="Good answer" aria-label="Good answer">👍</button>
@@ -506,7 +691,7 @@ export default function Assistant({ onClose }) {
 
       <footer class="ai-foot">
         <div class="ai-input">
-          <textarea ref={inputRef} rows={1} value={input} disabled={disabled} placeholder="Ask anything about your store…"
+          <textarea ref={inputRef} rows={1} value={input} disabled={disabled} placeholder="Ask, or paste a customer’s order…"
             onInput={(e) => {
               setInput(e.currentTarget.value);
               e.currentTarget.style.height = 'auto';
@@ -519,7 +704,7 @@ export default function Assistant({ onClose }) {
             <button class="ai-send primary" disabled={disabled || !input.trim()} onClick={() => ask(input)} title="Send (Enter)" aria-label="Send">↑</button>
           )}
         </div>
-        <div class="ai-note">AI can make mistakes. Check important numbers. It can only read your data, never change it.</div>
+        <div class="ai-note">AI can make mistakes. Check each card before you confirm it.</div>
       </footer>
     </aside>
   );

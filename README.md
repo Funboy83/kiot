@@ -33,9 +33,17 @@ Vietnamese: "ai còn đang nợ?", "top 10 products this month", "what will run 
 show all, export to CSV/Excel), small charts, highlights, suggested next steps and follow-up
 questions. Conversations are kept per user (☰ to reopen), with 👍/👎 and copy on every answer.
 
-It runs on the Claude API and is **read-only**: its tools can only read sales, products, stock,
-customers and debt; it cannot change anything, and it cannot see users, passwords or sessions.
-Cashiers get no cost or profit figures.
+It can also **do the work**. Paste a customer's message ("anh Nam 0909… lấy 2 cáp USB-C với
+1 iPhone 17 Pro, ck trước 500, còn lại ghi nợ") and it finds the customer and products and
+prepares the invoice; when something is unclear it asks, with clickable answers. It can likewise
+prepare payments, cancellations, new or changed customers and products, goods receipts, stock
+corrections and (admins only) settings. Every change appears as a card with the parsed details:
+customer, lines, serial/IMEI picked, total, paid now, payment method and the debt afterwards.
+Paid amount, method and serials can be changed on the card. **Nothing is saved until you press
+the card's button**; Dismiss drops it. A confirmed card runs through the app's own API as the
+signed-in user, so the same checks and permissions as the screens apply, and the assistant is
+told the outcome on the next message. Its read tools never see users, passwords or sessions, and
+cashiers get no cost or profit figures.
 
 To switch it on, set an API key from https://console.anthropic.com on the server and restart:
 
@@ -52,7 +60,17 @@ products and customers, customer debts with ageing, product and customer lookup,
 plus a guarded `run_sql` fallback for admins (`server/ai/readonly-sql.js`: single SELECT only,
 checked against SQLite's own read-only flag and compiled program, run in a separate read-only
 process with a 5 s limit). Tables go straight from the tool to the panel, so the model never
-retypes rows and numbers are exact.
+retypes rows and numbers are exact. Actions live in `server/ai/actions.js`: each has a
+`prepare` (checks the request, builds the card) and an `execute` (calls the app's API), and
+`/api/ai/actions/:id/confirm` runs a card at most once.
+
+## Simple and Advanced mode
+
+New stores start in **Simple** mode: the top bar shows Dashboard, Products, Invoices and
+Customers, and the sale screen and product form hide per-line discounts, sales orders, SKU,
+brand, minimum stock and attributes. **Advanced** mode adds Orders, Inventory (goods receipts,
+stock takes) and Reports, and every option. Admins switch from the name menu, on Settings, or by
+asking the assistant. Pages hidden in Simple mode still open from links.
 
 ## Stack and why it is fast
 

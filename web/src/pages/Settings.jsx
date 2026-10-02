@@ -36,6 +36,12 @@ export default function Settings() {
             <datalist id="tz">{['America/Los_Angeles', 'America/Denver', 'America/Chicago', 'America/New_York', 'Asia/Ho_Chi_Minh', 'UTC'].map((z) => <option key={z} value={z} />)}</datalist>
           </label>
           <label class="field"><span>Currency code</span><input value={form.currency} onInput={set('currency')} maxLength={3} /></label>
+          <label class="field"><span>App mode</span>
+            <select value={form.ui_mode || 'simple'} onChange={set('ui_mode')}>
+              <option value="simple">Simple: everyday screens only</option>
+              <option value="advanced">Advanced: orders, inventory, reports and every option</option>
+            </select>
+          </label>
         </div>
         <div class="row"><span class="spacer" /><button class="primary">Save</button></div>
       </form>

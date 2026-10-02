@@ -310,6 +310,41 @@ table.table { width: 100%; border-collapse: collapse; }
 .ai-followups { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 10px; }
 .ai-chip { border-radius: 999px; font-size: 13px; padding: 6px 12px; min-height: 32px; white-space: normal; text-align: left; justify-content: flex-start; }
 .ai-chip:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+.ai-card { margin: 10px 0 4px; border: 1px solid var(--border); border-left: 3px solid var(--primary); border-radius: var(--radius); background: var(--surface); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 1px 3px rgb(0 0 0 / 0.05); }
+.ai-card.danger { border-left-color: var(--bad); }
+.ai-card.done { border-left-color: var(--good); }
+.ai-card.cancelled { border-left-color: var(--border); opacity: 0.7; }
+.ai-card-head { display: flex; align-items: center; gap: 8px; }
+.ai-card-icon { font-size: 18px; }
+.ai-card-cust { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13px; background: var(--surface-2); border-radius: 8px; padding: 6px 10px; }
+.ai-card-lines { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ai-card-lines td { padding: 6px 0; border-bottom: 1px dashed var(--border); vertical-align: top; }
+.ai-card-lines td.num { text-align: right; white-space: nowrap; padding-left: 10px; font-variant-numeric: tabular-nums; }
+.ai-serials { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.ai-serials select { font-size: 12px; padding: 2px 6px; min-height: 26px; width: auto; }
+.ai-serials code { font-size: 11px; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+.ai-card-fields { margin: 0; display: grid; gap: 4px; font-size: 13px; }
+.ai-card-fields > div { display: flex; justify-content: space-between; gap: 12px; }
+.ai-card-fields dt { color: var(--muted); }
+.ai-card-fields dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.ai-card-totals { display: grid; gap: 4px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.ai-card-totals > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.ai-card-totals .big { font-size: 15px; font-weight: 700; }
+.ai-paid { width: 120px; text-align: right; padding: 4px 8px; min-height: 30px; }
+.ai-seg { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.ai-seg button { flex: 1; border: 0; border-radius: 0; min-height: 32px; font-size: 13px; }
+.ai-seg button + button { border-left: 1px solid var(--border); }
+.ai-seg button.on { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+.ai-warn { font-size: 12px; color: var(--warn); background: var(--warn-soft); border-radius: 6px; padding: 5px 8px; }
+.ai-card-buttons { display: flex; gap: 8px; }
+.ai-card-buttons .primary, .ai-card-buttons .danger { flex: 1; }
+.ai-card-buttons button.danger { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 600; }
+.ai-card-result { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--good); font-weight: 600; }
+.ai-options { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.ai-options-q { font-weight: 600; font-size: 13px; }
+.ai-option { justify-content: flex-start; text-align: left; white-space: normal; border-radius: 10px; padding: 8px 12px; border-color: var(--primary); color: var(--primary); background: var(--surface); }
+.ai-option:hover:not(:disabled) { background: var(--primary-soft); }
+.ai-option:disabled { border-color: var(--border); color: var(--muted); opacity: 0.8; }
 .ai-actions { display: flex; gap: 2px; margin-top: 6px; }
 .ai-actions .icon-btn { font-size: 14px; opacity: 0.6; min-height: 28px; padding: 2px 6px; }
 .ai-actions .icon-btn:hover, .ai-actions .icon-btn.on { opacity: 1; }

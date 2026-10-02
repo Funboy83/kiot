@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { get, post, put, toCents, fromCents } from '../api.js';
-import { useFetch, ErrorBox, toast } from '../components/ui.jsx';
+import { useFetch, ErrorBox, toast, useAdvanced } from '../components/ui.jsx';
 
 const blank = { name: '', sku: '', barcode: '', category_name: '', brand: '', price: '', cost: '', min_stock: '0', stock: '', track_serial: false, attrs: [['', '']] };
 
@@ -9,6 +9,7 @@ export default function ProductForm({ params }) {
   const loc = useLocation();
   const editing = params.id;
   const copyFrom = loc.query.copy;
+  const advanced = useAdvanced();
   const [form, setForm] = useState(editing || copyFrom ? null : blank);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -81,18 +82,18 @@ export default function ProductForm({ params }) {
       <div class="card stack">
         <label class="field"><span>Name</span><input required autoFocus value={form.name} onInput={set('name')} /></label>
         <div class="form-grid">
-          <label class="field"><span>SKU (blank = automatic)</span><input value={form.sku} onInput={set('sku')} /></label>
+          {advanced && <label class="field"><span>SKU (blank = automatic)</span><input value={form.sku} onInput={set('sku')} /></label>}
           <label class="field"><span>Barcode</span><input value={form.barcode} onInput={set('barcode')} /></label>
           <label class="field"><span>Category</span>
             <input list="cats" value={form.category_name} onInput={set('category_name')} placeholder="Pick or type a new one" />
             <datalist id="cats">{cats?.map((c) => <option key={c.id} value={c.name} />)}</datalist>
           </label>
-          <label class="field"><span>Brand</span><input value={form.brand} onInput={set('brand')} /></label>
+          {advanced && <label class="field"><span>Brand</span><input value={form.brand} onInput={set('brand')} /></label>}
         </div>
         <div class="form-grid">
           <label class="field"><span>Sale price</span><input inputMode="decimal" value={form.price} onInput={set('price')} placeholder="0.00" /></label>
           <label class="field"><span>Cost</span><input inputMode="decimal" value={form.cost} onInput={set('cost')} placeholder="0.00" /></label>
-          <label class="field"><span>Minimum stock</span><input inputMode="numeric" value={form.min_stock} onInput={set('min_stock')} /></label>
+          {advanced && <label class="field"><span>Minimum stock</span><input inputMode="numeric" value={form.min_stock} onInput={set('min_stock')} /></label>}
           {!editing && !form.track_serial && <label class="field"><span>Opening stock</span><input inputMode="numeric" value={form.stock} onInput={set('stock')} placeholder="0" /></label>}
         </div>
         <label class="row" style="gap:8px">
@@ -100,7 +101,7 @@ export default function ProductForm({ params }) {
           <span>Track each unit by serial/IMEI <span class="muted small">(phones, laptops, watches). Stock then comes in through a goods receipt so every serial is recorded.</span></span>
         </label>
       </div>
-      <div class="card stack">
+      {(advanced || form.attrs.some(([k]) => k)) && <div class="card stack">
         <h2>Attributes</h2>
         <p class="muted small" style="margin:0">Free-form, e.g. STORAGE 256GB, COLOR Midnight, CONDITION New.</p>
         {form.attrs.map(([k, v], i) => (
@@ -109,7 +110,7 @@ export default function ProductForm({ params }) {
             <input placeholder="Value" value={v} onInput={(e) => setAttr(i, 1, e.currentTarget.value)} aria-label="Attribute value" />
           </div>
         ))}
-      </div>
+      </div>}
       <div class="row"><span class="spacer" /><button class="primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button></div>
     </form>
   );

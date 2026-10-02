@@ -344,7 +344,7 @@ const findCustomers = {
   def: {
     name: 'find_customers',
     description:
-      'Look up customers by name, code or phone (partial match). Returns contact info, lifetime purchases, invoice count, first/last purchase, current debt, and their unpaid invoices.',
+      'Look up customers by name, code or phone (partial match). Returns their id (needed for actions), contact info, lifetime purchases, invoice count, first/last purchase, current debt, and their unpaid invoices.',
     input_schema: {
       type: 'object',
       properties: { query: { type: 'string', description: 'Name, code (KH…) or phone digits.' } },
@@ -354,9 +354,15 @@ const findCustomers = {
   run(db, input) {
     const q = text(input.query, 'query');
     const m = textMatch(q, 'customers_fts', 'c.id', ['c.name', 'c.code', 'c.phone']);
+    // Phone numbers are stored as typed; also match on digits only so "714-555 0101" finds "(714) 555-0101".
+    const digits = q.replace(/\D/g, '');
+    const byDigits = digits.length >= 4 && digits.length === q.replace(/[\s().+-]/g, '').length;
+    const where = byDigits
+      ? `(${m.sql} OR replace(replace(replace(replace(replace(replace(c.phone, ' ', ''), '-', ''), '(', ''), ')', ''), '.', ''), '+', '') LIKE ?)`
+      : m.sql;
     const found = db
-      .prepare(`SELECT c.id, c.code, c.name, c.phone, c.email, c.address, c.type, c.debt, c.total_sales, c.note FROM customers c WHERE ${m.sql} ORDER BY c.total_sales DESC LIMIT 5`)
-      .all(...m.params);
+      .prepare(`SELECT c.id, c.code, c.name, c.phone, c.email, c.address, c.type, c.debt, c.total_sales, c.note FROM customers c WHERE ${where} ORDER BY c.total_sales DESC LIMIT 8`)
+      .all(...m.params, ...(byDigits ? ['%' + digits + '%'] : []));
     const stats = db.prepare(
       `SELECT COUNT(*) AS invoices, MIN(biz_date) AS first_purchase, MAX(biz_date) AS last_purchase
        FROM invoices WHERE customer_id = ? AND kind = 'invoice' AND status = 'completed'`
@@ -366,6 +372,7 @@ const findCustomers = {
     );
     return {
       matches: found.map((c) => ({
+        id: c.id,
         code: c.code,
         name: c.name,
         phone: c.phone,
@@ -386,7 +393,7 @@ const findProducts = {
   def: {
     name: 'find_products',
     description:
-      'Look up products by name, SKU or barcode (partial match). Returns price, stock, minimum stock, category, serial/IMEI units in stock, units sold in the last 30 days and days of stock left at that pace.',
+      'Look up products by name, SKU, barcode or serial/IMEI (partial match). Returns their id (needed for actions), price, stock, minimum stock, category, serial/IMEI units in stock, units sold in the last 30 days and days of stock left at that pace.',
     input_schema: {
       type: 'object',
       properties: { query: { type: 'string', description: 'Product name words, SKU or barcode.' } },
@@ -403,12 +410,13 @@ const findProducts = {
                 (SELECT COALESCE(SUM(ii.qty), 0) FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
                   WHERE ii.product_id = p.id AND ${SOLD} AND i.biz_date >= ?) AS sold_30d,
                 (SELECT MAX(i.biz_date) FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id WHERE ii.product_id = p.id AND ${SOLD}) AS last_sold
-         FROM products p LEFT JOIN categories c ON c.id = p.category_id WHERE ${m.sql} ORDER BY p.active DESC, sold_30d DESC LIMIT 10`
+         FROM products p LEFT JOIN categories c ON c.id = p.category_id WHERE (${m.sql} OR p.id IN (SELECT product_id FROM serials WHERE serial = ?)) ORDER BY p.active DESC, sold_30d DESC LIMIT 10`
       )
-      .all(since, ...m.params);
+      .all(since, ...m.params, q);
     const serials = db.prepare("SELECT serial FROM serials WHERE product_id = ? AND status = 'in_stock' ORDER BY received_at LIMIT 20");
     return {
       matches: rows.map((p) => ({
+        id: p.id,
         sku: p.sku,
         barcode: p.barcode,
         name: p.name,

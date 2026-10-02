@@ -1,8 +1,8 @@
 import { render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { LocationProvider, Router, Route, lazy, ErrorBoundary, useLocation } from 'preact-iso';
-import { get, post, setUnauthorizedHandler, configureFormats, money } from './api.js';
-import { AppContext, Toasts, SearchSelect, Status, useApp } from './components/ui.jsx';
+import { get, post, put, setUnauthorizedHandler, configureFormats, money } from './api.js';
+import { AppContext, Toasts, SearchSelect, Status, useApp, toast } from './components/ui.jsx';
 import Login from './pages/Login.jsx';
 import './styles.css';
 
@@ -25,14 +25,15 @@ const Reports = lazy(() => import('./pages/Reports.jsx'));
 const Settings = lazy(() => import('./pages/Settings.jsx'));
 const Assistant = lazy(() => import('./components/Assistant.jsx'));
 
+// The third entry marks screens only shown in Advanced mode; their pages still open from links.
 const NAV = [
   ['/', 'Dashboard'],
   ['/products', 'Products'],
-  ['/inventory', 'Inventory'],
+  ['/inventory', 'Inventory', true],
   ['/invoices', 'Invoices'],
-  ['/orders', 'Orders'],
+  ['/orders', 'Orders', true],
   ['/customers', 'Customers'],
-  ['/reports', 'Reports'],
+  ['/reports', 'Reports', true],
 ];
 
 function isActive(path, href) {
@@ -82,7 +83,17 @@ function readAiOpen() {
 
 function Shell({ user, onLogout, children }) {
   const { path } = useLocation();
-  const { settings } = useApp();
+  const { settings, reloadSettings } = useApp();
+  const advanced = settings.ui_mode === 'advanced';
+  const setMode = async (mode) => {
+    try {
+      await put('/settings', { ui_mode: mode });
+      await reloadSettings();
+      toast(mode === 'advanced' ? 'Advanced mode: every screen and option is shown' : 'Simple mode: only the everyday screens');
+    } catch (e) {
+      toast(e.message, 'bad');
+    }
+  };
   const [aiOpen, setAiOpenState] = useState(readAiOpen);
   const setAiOpen = (open) => {
     setAiOpenState(open);
@@ -115,7 +126,7 @@ function Shell({ user, onLogout, children }) {
       <header class={'topbar' + (aiOpen ? ' with-ai' : '')}>
         <a class="brand" href="/">{settings.store_name || 'Store'}</a>
         <nav class="nav" aria-label="Main">
-          {NAV.map(([href, label]) => (
+          {NAV.filter(([href, , adv]) => advanced || !adv || isActive(path, href)).map(([href, label]) => (
             <a key={href} href={href} class={isActive(path, href) ? 'active' : ''}>{label}</a>
           ))}
         </nav>
@@ -129,6 +140,11 @@ function Shell({ user, onLogout, children }) {
           <summary class="btn user-btn" style="list-style:none">{user.name}</summary>
           <div class="dropdown" style="left:auto;right:0;min-width:160px">
             {user.role === 'admin' && <a class="opt" href="/settings">Settings & staff</a>}
+            {user.role === 'admin' && (
+              <a class="opt" href="#" onClick={(e) => { e.preventDefault(); e.currentTarget.closest('details').removeAttribute('open'); setMode(advanced ? 'simple' : 'advanced'); }}>
+                {advanced ? 'Switch to Simple mode' : 'Switch to Advanced mode'}
+              </a>
+            )}
             <a class="opt" href="#" onClick={(e) => { e.preventDefault(); onLogout(); }}>Sign out</a>
           </div>
         </details>
