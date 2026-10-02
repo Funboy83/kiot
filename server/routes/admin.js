@@ -8,10 +8,12 @@ export default function admin(app, db) {
   app.put('/api/settings', async (c) => {
     requireAdmin(c);
     const body = await c.req.json();
+    const current = getSettings(db);
     const next = {
-      store_name: str(body.store_name, 'Store name', { max: 100 }),
-      timezone: str(body.timezone, 'Timezone', { max: 60 }),
-      currency: str(body.currency, 'Currency', { max: 3 }).toUpperCase(),
+      store_name: str(body.store_name ?? current.store_name, 'Store name', { max: 100 }),
+      timezone: str(body.timezone ?? current.timezone, 'Timezone', { max: 60 }),
+      currency: str(body.currency ?? current.currency, 'Currency', { max: 3 }).toUpperCase(),
+      ui_mode: (body.ui_mode ?? current.ui_mode) === 'advanced' ? 'advanced' : 'simple',
     };
     try {
       new Intl.DateTimeFormat('en', { timeZone: next.timezone });

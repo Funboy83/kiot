@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { get, post, money, toCents, fromCents, dateTime } from '../api.js';
-import { SearchSelect, Modal, toast, useApp, ErrorBox } from '../components/ui.jsx';
+import { SearchSelect, Modal, toast, useApp, useAdvanced, ErrorBox } from '../components/ui.jsx';
 
 const STORAGE_KEY = 'pos-carts-v1';
 let nextId = 1;
@@ -19,6 +19,7 @@ const lineTotal = (l) => l.qty * (l.price - l.discount);
 
 export default function Pos() {
   const { user } = useApp();
+  const advanced = useAdvanced();
   const loc = useLocation();
   const [state, setState] = useState(loadCarts);
   const [serialFor, setSerialFor] = useState(null); // product id whose serial picker is open
@@ -218,8 +219,8 @@ export default function Pos() {
                 )}
                 <label class="small muted row" style="gap:4px">× <input inputMode="decimal" aria-label="Unit price" value={fromCents(l.price)}
                   onChange={(e) => { const v = Math.max(0, toCents(e.currentTarget.value)); setItems((its) => its.map((x) => (x === l ? { ...x, price: v, discount: Math.min(x.discount, v) } : x))); }} /></label>
-                <label class="small muted row" style="gap:4px">− <input inputMode="decimal" aria-label="Discount per unit" placeholder="discount" value={l.discount ? fromCents(l.discount) : ''}
-                  onChange={(e) => { const v = Math.max(0, toCents(e.currentTarget.value)); setItems((its) => its.map((x) => (x === l ? { ...x, discount: Math.min(v, x.price) } : x))); }} /></label>
+                {(advanced || l.discount > 0) && <label class="small muted row" style="gap:4px">− <input inputMode="decimal" aria-label="Discount per unit" placeholder="discount" value={l.discount ? fromCents(l.discount) : ''}
+                  onChange={(e) => { const v = Math.max(0, toCents(e.currentTarget.value)); setItems((its) => its.map((x) => (x === l ? { ...x, discount: Math.min(v, x.price) } : x))); }} /></label>}
                 <span class="spacer" />
                 <button class="ghost icon-btn danger" onClick={() => setItems((its) => its.filter((x) => x !== l))} aria-label={`Remove ${l.name}`}>🗑</button>
               </div>
@@ -276,7 +277,7 @@ export default function Pos() {
           <input placeholder="Note" value={cart.note} onInput={(e) => update({ note: e.currentTarget.value })} />
           <ErrorBox error={error} />
           <span class="spacer" />
-          <button class="ghost" disabled={busy || !cart.items.length || !!cart.order_id} onClick={() => checkout('order')}>Save as order (no stock change)</button>
+          {advanced && <button class="ghost" disabled={busy || !cart.items.length || !!cart.order_id} onClick={() => checkout('order')}>Save as order (no stock change)</button>}
           <button id="checkout" class="primary checkout" disabled={busy} onClick={() => checkout('invoice')}>
             {busy ? 'Saving…' : `Pay ${money(total)}`} <span class="kbd" style="color:inherit;border-color:currentColor">F9</span>
           </button>

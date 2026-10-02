@@ -8,8 +8,9 @@ import inventory from './routes/inventory.js';
 import reports from './routes/reports.js';
 import admin from './routes/admin.js';
 import search from './routes/search.js';
+import ai from './routes/ai.js';
 
-export function createApp(db) {
+export function createApp(db, opts = {}) {
   const app = new Hono();
 
   app.onError((err, c) => {
@@ -46,6 +47,7 @@ export function createApp(db) {
   app.get('/api/auth/me', (c) => c.json(c.get('user')));
 
   for (const mount of [products, customers, invoices, inventory, reports, admin, search]) mount(app, db);
+  ai(app, db, opts);
 
   app.all('/api/*', (c) => c.json({ error: 'Not found' }, 404));
   return app;

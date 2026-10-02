@@ -1,8 +1,8 @@
 import { render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { LocationProvider, Router, Route, lazy, ErrorBoundary, useLocation } from 'preact-iso';
-import { get, post, setUnauthorizedHandler, configureFormats, money } from './api.js';
-import { AppContext, Toasts, SearchSelect, Status, useApp } from './components/ui.jsx';
+import { get, post, put, setUnauthorizedHandler, configureFormats, money } from './api.js';
+import { AppContext, Toasts, SearchSelect, Status, useApp, toast } from './components/ui.jsx';
 import Login from './pages/Login.jsx';
 import './styles.css';
 
@@ -23,15 +23,17 @@ const Customers = lazy(() => import('./pages/Customers.jsx'));
 const CustomerDetail = lazy(() => import('./pages/CustomerDetail.jsx'));
 const Reports = lazy(() => import('./pages/Reports.jsx'));
 const Settings = lazy(() => import('./pages/Settings.jsx'));
+const Assistant = lazy(() => import('./components/Assistant.jsx'));
 
+// The third entry marks screens only shown in Advanced mode; their pages still open from links.
 const NAV = [
   ['/', 'Dashboard'],
   ['/products', 'Products'],
-  ['/inventory', 'Inventory'],
+  ['/inventory', 'Inventory', true],
   ['/invoices', 'Invoices'],
-  ['/orders', 'Orders'],
+  ['/orders', 'Orders', true],
   ['/customers', 'Customers'],
-  ['/reports', 'Reports'],
+  ['/reports', 'Reports', true],
 ];
 
 function isActive(path, href) {
@@ -71,14 +73,48 @@ function GlobalSearch() {
 }
 const globalSearchRef = { current: null };
 
+function readAiOpen() {
+  try {
+    return localStorage.getItem('ai.open') === '1';
+  } catch {
+    return false;
+  }
+}
+
 function Shell({ user, onLogout, children }) {
   const { path } = useLocation();
-  const { settings } = useApp();
+  const { settings, reloadSettings } = useApp();
+  const advanced = settings.ui_mode === 'advanced';
+  const setMode = async (mode) => {
+    try {
+      await put('/settings', { ui_mode: mode });
+      await reloadSettings();
+      toast(mode === 'advanced' ? 'Advanced mode: every screen and option is shown' : 'Simple mode: only the everyday screens');
+    } catch (e) {
+      toast(e.message, 'bad');
+    }
+  };
+  const [aiOpen, setAiOpenState] = useState(readAiOpen);
+  const setAiOpen = (open) => {
+    setAiOpenState(open);
+    try {
+      localStorage.setItem('ai.open', open ? '1' : '0');
+    } catch {}
+  };
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === '/' && !/input|textarea|select/i.test(document.activeElement?.tagName)) {
         e.preventDefault();
         globalSearchRef.current?.focus();
+      }
+      if (e.key.toLowerCase() === 'j' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        setAiOpenState((open) => {
+          try {
+            localStorage.setItem('ai.open', open ? '0' : '1');
+          } catch {}
+          return !open;
+        });
       }
     };
     window.addEventListener('keydown', onKey);
@@ -87,25 +123,34 @@ function Shell({ user, onLogout, children }) {
   if (path === '/pos') return children;
   return (
     <>
-      <header class="topbar">
+      <header class={'topbar' + (aiOpen ? ' with-ai' : '')}>
         <a class="brand" href="/">{settings.store_name || 'Store'}</a>
         <nav class="nav" aria-label="Main">
-          {NAV.map(([href, label]) => (
+          {NAV.filter(([href, , adv]) => advanced || !adv || isActive(path, href)).map(([href, label]) => (
             <a key={href} href={href} class={isActive(path, href) ? 'active' : ''}>{label}</a>
           ))}
         </nav>
         <span class="spacer hide-md" />
         <GlobalSearch />
+        <button class={'btn ai-btn' + (aiOpen ? ' on' : '')} onClick={() => setAiOpen(!aiOpen)} title="Ask the assistant (Ctrl+J)" aria-expanded={aiOpen}>
+          ✨ <span class="hide-sm">Assistant</span>
+        </button>
         <a class="btn pos-btn" href="/pos">🛒 Sell</a>
         <details class="user-menu" style="position:relative" onClick={(e) => e.target.closest('a') && e.currentTarget.removeAttribute('open')}>
           <summary class="btn user-btn" style="list-style:none">{user.name}</summary>
           <div class="dropdown" style="left:auto;right:0;min-width:160px">
             {user.role === 'admin' && <a class="opt" href="/settings">Settings & staff</a>}
+            {user.role === 'admin' && (
+              <a class="opt" href="#" onClick={(e) => { e.preventDefault(); e.currentTarget.closest('details').removeAttribute('open'); setMode(advanced ? 'simple' : 'advanced'); }}>
+                {advanced ? 'Switch to Simple mode' : 'Switch to Advanced mode'}
+              </a>
+            )}
             <a class="opt" href="#" onClick={(e) => { e.preventDefault(); onLogout(); }}>Sign out</a>
           </div>
         </details>
       </header>
-      <main class="page">{children}</main>
+      <main class={'page' + (aiOpen ? ' with-ai' : '')}>{children}</main>
+      {aiOpen && <Assistant onClose={() => setAiOpen(false)} />}
     </>
   );
 }
