@@ -1,4 +1,6 @@
 FROM node:22-slim AS build
+# better-sqlite3 compiles its native addon during npm ci; slim images lack the toolchain.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
