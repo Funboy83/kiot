@@ -20,6 +20,12 @@ export function createApp(db, opts = {}) {
     return c.json({ error: 'Something went wrong' }, 500);
   });
 
+  // Unauthenticated liveness check for the host (Railway health check); also proves the database answers.
+  app.get('/healthz', (c) => {
+    db.prepare('SELECT 1').get();
+    return c.text('ok');
+  });
+
   app.post('/api/auth/login', async (c) => {
     const { username, password } = await c.req.json();
     return c.json(login(c, db, username, password));

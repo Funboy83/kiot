@@ -121,3 +121,19 @@ streaming, history, read-only SQL guard, roles) against a scripted stand-in for 
 Any host that runs Node and keeps a disk works: a small VPS, Fly.io or Railway with
 a volume, or a mini PC in the shop. Serverless hosts like Vercel do not keep the
 SQLite file between requests, so they are not a fit as-is. A `Dockerfile` is included.
+
+### Railway (Free plan is enough)
+
+`railway.json` points Railway at the `Dockerfile` and its `/healthz` check. The app needs
+about 120 MB of memory, up to about 190 MB while the assistant runs a custom query, so the
+Free plan's 0.5 GB is plenty; the database grows by roughly 1 MB per 1,000 invoices.
+
+1. On railway.com, sign in with GitHub, then **New Project → Deploy from GitHub repo** and pick this repo.
+2. Right-click the service (or the canvas) → **Add Volume**, mount path `/data`. The database lives there and survives redeploys.
+3. In the service's **Variables**, add `ADMIN_PASSWORD` (the first admin's password; without it the
+   first admin is `admin` / `admin123`) and, for the assistant, `ANTHROPIC_API_KEY`.
+4. **Settings → Networking → Generate Domain**, then open the link and sign in as `admin`.
+
+The first boot creates only the admin account, no demo data. `ADMIN_PASSWORD` is read only
+when the database is empty; afterwards change passwords under **Settings & staff**. Back up by
+downloading `/data/store.db` now and then (Railway's volume backups work too).
